@@ -12,7 +12,7 @@
 1. Fork 本仓库，创建 Vercel 项目并关联
 2. 在 Vercel 环境变量中填写：
 
-	| 环境变量 | 说明 | 备注 / 默认值 |
+	| 环境变量 | 说明 | 备注 |
 	|---|---|---|
 	| CLIPROXY_SECRET_KEY | 登录 CLIProxyAPI 后台管理界面的密钥 | 无 |
 	| CLIPROXY_API_BASE_URL | 自部署的 CLIProxyAPI 根地址 | 如 `https://your-domain.com/` |

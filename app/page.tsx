@@ -112,6 +112,36 @@ export default function DashboardPage() {
   const syncingRef = useRef(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
+  const [trendVisible, setTrendVisible] = useState<Record<string, boolean>>({
+    requests: true,
+    tokens: true,
+    cost: true,
+  });
+
+  const [hourlyVisible, setHourlyVisible] = useState<Record<string, boolean>>({
+    requests: true,
+    inputTokens: true,
+    outputTokens: true,
+    reasoningTokens: true,
+    cachedTokens: true,
+  });
+
+  const handleTrendLegendClick = (e: any) => {
+    const { dataKey } = e;
+    setTrendVisible((prev) => ({
+      ...prev,
+      [dataKey]: !prev[dataKey as string],
+    }));
+  };
+
+  const handleHourlyLegendClick = (e: any) => {
+    const { dataKey } = e;
+    setHourlyVisible((prev) => ({
+      ...prev,
+      [dataKey]: !prev[dataKey as string],
+    }));
+  };
+
   const cancelPieLegendClear = useCallback(() => {
     if (pieLegendClearTimerRef.current !== null) {
       window.clearTimeout(pieLegendClearTimerRef.current);
@@ -707,10 +737,15 @@ export default function DashboardPage() {
                     contentStyle={{ borderRadius: 12, backgroundColor: "rgba(0,0,0,0.8)", border: "1px solid rgba(100,116,139,0.6)", color: "#f8fafc" }}
                     formatter={(value: number, name: string) => name === "费用" ? [formatCurrency(value), name] : [formatNumberWithCommas(value), name]}
                   />
-                  <Legend height={24} iconSize={10} wrapperStyle={{ paddingTop: 0, paddingBottom: 0, lineHeight: "24px" }} />
-                  <Line yAxisId="left" type="monotone" dataKey="requests" stroke="#3b82f6" strokeWidth={2} name="请求数" dot={{ r: 3 }} />
-                  <Line yAxisId="right" type="monotone" dataKey="tokens" stroke="#10b981" strokeWidth={2} name="Tokens" dot={{ r: 3 }} />
-                  <Line yAxisId="cost" type="monotone" dataKey="cost" stroke="#fbbf24" strokeWidth={2} name="费用" dot={{ r: 3 }} />
+                  <Legend 
+                    height={24} 
+                    iconSize={10} 
+                    wrapperStyle={{ paddingTop: 0, paddingBottom: 0, lineHeight: "24px", cursor: "pointer" }} 
+                    onClick={handleTrendLegendClick}
+                  />
+                  <Line hide={!trendVisible.requests} yAxisId="left" type="monotone" dataKey="requests" stroke="#3b82f6" strokeWidth={2} name="请求数" dot={{ r: 3 }} />
+                  <Line hide={!trendVisible.tokens} yAxisId="right" type="monotone" dataKey="tokens" stroke="#10b981" strokeWidth={2} name="Tokens" dot={{ r: 3 }} />
+                  <Line hide={!trendVisible.cost} yAxisId="cost" type="monotone" dataKey="cost" stroke="#fbbf24" strokeWidth={2} name="费用" dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -930,14 +965,18 @@ export default function DashboardPage() {
                     formatter={(value: number, name: string) => [formatNumberWithCommas(value), name]}
                     labelFormatter={(label) => formatHourLabel(label)}
                   />
-                  <Legend />
+                  <Legend 
+                    wrapperStyle={{ cursor: "pointer" }} 
+                    onClick={handleHourlyLegendClick}
+                  />
                   {/* 堆积柱状图 - 柔和配色，仅顶部圆角 */}
-                  <Bar yAxisId="right" dataKey="inputTokens" name="输入" stackId="tokens" fill="#60a5fa" />
-                  <Bar yAxisId="right" dataKey="outputTokens" name="输出" stackId="tokens" fill="#4ade80" />
-                  <Bar yAxisId="right" dataKey="reasoningTokens" name="思考" stackId="tokens" fill="#fbbf24" />
-                  <Bar yAxisId="right" dataKey="cachedTokens" name="缓存" stackId="tokens" fill="#c084fc" radius={[4, 4, 0, 0]} />
+                  <Bar hide={!hourlyVisible.inputTokens} yAxisId="right" dataKey="inputTokens" name="输入" stackId="tokens" fill="#60a5fa" />
+                  <Bar hide={!hourlyVisible.outputTokens} yAxisId="right" dataKey="outputTokens" name="输出" stackId="tokens" fill="#4ade80" />
+                  <Bar hide={!hourlyVisible.reasoningTokens} yAxisId="right" dataKey="reasoningTokens" name="思考" stackId="tokens" fill="#fbbf24" />
+                  <Bar hide={!hourlyVisible.cachedTokens} yAxisId="right" dataKey="cachedTokens" name="缓存" stackId="tokens" fill="#c084fc" radius={[4, 4, 0, 0]} />
                   {/* 曲线在最上层 - 带描边突出显示 */}
                   <Line 
+                    hide={!hourlyVisible.requests}
                     yAxisId="left" 
                     type="monotone" 
                     dataKey="requests" 
@@ -1244,10 +1283,15 @@ export default function DashboardPage() {
                       contentStyle={{ borderRadius: 12, backgroundColor: "rgba(0,0,0,0.8)", border: "1px solid rgba(100,116,139,0.6)", color: "#f8fafc" }}
                       formatter={(value: number, name: string) => name === "费用" ? [formatCurrency(value), name] : [formatNumberWithCommas(value), name]}
                     />
-                    <Legend height={24} iconSize={10} wrapperStyle={{ paddingTop: 0, paddingBottom: 0, lineHeight: "24px" }} />
-                    <Line yAxisId="left" type="monotone" dataKey="requests" stroke="#3b82f6" strokeWidth={2} name="请求数" dot={{ r: 3 }} />
-                    <Line yAxisId="right" type="monotone" dataKey="tokens" stroke="#10b981" strokeWidth={2} name="Tokens" dot={{ r: 3 }} />
-                    <Line yAxisId="cost" type="monotone" dataKey="cost" stroke="#fbbf24" strokeWidth={2} name="费用" dot={{ r: 3 }} />
+                    <Legend 
+                      height={24} 
+                      iconSize={10} 
+                      wrapperStyle={{ paddingTop: 0, paddingBottom: 0, lineHeight: "24px", cursor: "pointer" }} 
+                      onClick={handleTrendLegendClick}
+                    />
+                    <Line hide={!trendVisible.requests} yAxisId="left" type="monotone" dataKey="requests" stroke="#3b82f6" strokeWidth={2} name="请求数" dot={{ r: 3 }} />
+                    <Line hide={!trendVisible.tokens} yAxisId="right" type="monotone" dataKey="tokens" stroke="#10b981" strokeWidth={2} name="Tokens" dot={{ r: 3 }} />
+                    <Line hide={!trendVisible.cost} yAxisId="cost" type="monotone" dataKey="cost" stroke="#fbbf24" strokeWidth={2} name="费用" dot={{ r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -1378,12 +1422,16 @@ export default function DashboardPage() {
                       formatter={(value: number, name: string) => [formatNumberWithCommas(value), name]}
                       labelFormatter={(label) => formatHourLabel(label)}
                     />
-                    <Legend />
-                    <Bar yAxisId="right" dataKey="inputTokens" name="输入" stackId="tokens" fill="#60a5fa" />
-                    <Bar yAxisId="right" dataKey="outputTokens" name="输出" stackId="tokens" fill="#4ade80" />
-                    <Bar yAxisId="right" dataKey="reasoningTokens" name="思考" stackId="tokens" fill="#fbbf24" />
-                    <Bar yAxisId="right" dataKey="cachedTokens" name="缓存" stackId="tokens" fill="#c084fc" radius={[4, 4, 0, 0]} />
+                    <Legend 
+                      wrapperStyle={{ cursor: "pointer" }} 
+                      onClick={handleHourlyLegendClick}
+                    />
+                    <Bar hide={!hourlyVisible.inputTokens} yAxisId="right" dataKey="inputTokens" name="输入" stackId="tokens" fill="#60a5fa" />
+                    <Bar hide={!hourlyVisible.outputTokens} yAxisId="right" dataKey="outputTokens" name="输出" stackId="tokens" fill="#4ade80" />
+                    <Bar hide={!hourlyVisible.reasoningTokens} yAxisId="right" dataKey="reasoningTokens" name="思考" stackId="tokens" fill="#fbbf24" />
+                    <Bar hide={!hourlyVisible.cachedTokens} yAxisId="right" dataKey="cachedTokens" name="缓存" stackId="tokens" fill="#c084fc" radius={[4, 4, 0, 0]} />
                     <Line 
+                      hide={!hourlyVisible.requests}
                       yAxisId="left" 
                       type="monotone" 
                       dataKey="requests" 
