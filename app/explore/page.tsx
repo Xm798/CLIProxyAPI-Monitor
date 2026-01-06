@@ -469,6 +469,7 @@ export default function ExplorePage() {
     } catch (err) {
       console.warn("Failed to load global rangeSelection", err);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
 
