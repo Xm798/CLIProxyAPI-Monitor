@@ -628,7 +628,7 @@ export default function RecordsPage() {
               {records.map((row) => (
                 <tr
                   key={row.id}
-                  className="rounded-lg bg-slate-900/70 text-slate-100 shadow-sm ring-1 ring-slate-800 transition hover:ring-2 hover:ring-indigo-400/60 hover:shadow-[0_0_12px_rgba(99,102,241,0.35)] h-13"
+                  className="rounded-lg bg-slate-900/70 text-slate-100 shadow-sm ring-1 ring-slate-800 transition hover:ring-1.5 hover:ring-indigo-400/40 hover:shadow-[0_0_24px_rgba(99,102,241,0.18)] h-13"
                 >
                   <td className="px-3 py-3 whitespace-nowrap first:rounded-l-lg last:rounded-r-lg">
                     <div className="text-sm font-semibold text-white">{formatTimestamp(row.occurredAt)}</div>
