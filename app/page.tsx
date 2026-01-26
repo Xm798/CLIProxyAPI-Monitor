@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef, startTransition, typ
 import { ResponsiveContainer, LineChart, Line, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, Legend, ComposedChart, PieChart, Pie, Cell } from "recharts";
 import type { TooltipProps } from "recharts";
 import { formatCurrency, formatNumber, formatCompactNumber, formatNumberWithCommas, formatHourLabel } from "@/lib/utils";
-import { AlertTriangle, Info, LucideIcon, Activity, Save, RefreshCw, Moon, Sun, Pencil, Trash2, Maximize2, CalendarRange, X } from "lucide-react";
+import { AlertTriangle, Info, LucideIcon, Activity, Save, RefreshCw, Moon, Sun, Pencil, Trash2, Maximize2, CalendarRange, X, DollarSign } from "lucide-react";
 import type { ModelPrice, UsageOverview, UsageSeriesPoint } from "@/lib/types";
 import { Modal } from "@/app/components/Modal";
 
@@ -110,42 +110,45 @@ export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [prices, setPrices] = useState<ModelPrice[]>([]);
 
+  // 默认值 - 服务端和客户端首次渲染使用相同值
+  const defaultEnd = new Date();
+  const defaultStart = new Date(defaultEnd.getTime() - 6 * DAY_MS);
+  const fallbackRange = { mode: "preset" as const, days: 14, start: formatDateInputValue(defaultStart), end: formatDateInputValue(defaultEnd) };
+
+  const [rangeMode, setRangeMode] = useState<"preset" | "custom">(fallbackRange.mode);
+  const [rangeDays, setRangeDays] = useState(fallbackRange.days);
+  const [customStart, setCustomStart] = useState(fallbackRange.start);
+  const [customEnd, setCustomEnd] = useState(fallbackRange.end);
+  const [appliedDays, setAppliedDays] = useState(fallbackRange.days);
+
   useEffect(() => {
     setMounted(true);
+    // 客户端挂载后从 localStorage 恢复用户选择
+    const saved = window.localStorage.getItem("rangeSelection");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as { mode?: "preset" | "custom"; days?: number; start?: string; end?: string };
+        if (parsed && (parsed.mode === "preset" || parsed.mode === "custom")) {
+          setRangeMode(parsed.mode);
+          if (Number.isFinite(parsed.days)) {
+            setRangeDays(Math.max(1, Number(parsed.days)));
+            setAppliedDays(Math.max(1, Number(parsed.days)));
+          }
+          if (parsed.start) setCustomStart(parsed.start);
+          if (parsed.end) setCustomEnd(parsed.end);
+        }
+      } catch (err) {
+        console.warn("Failed to parse saved rangeSelection", err);
+      }
+    }
   }, []);
   const [overview, setOverview] = useState<UsageOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [overviewEmpty, setOverviewEmpty] = useState(false);
   const [loadingOverview, setLoadingOverview] = useState(true);
-  const [rangeInit] = useState(() => {
-    const defaultEnd = new Date();
-    const defaultStart = new Date(defaultEnd.getTime() - 6 * DAY_MS);
-    const fallback = { mode: "preset" as const, days: 14, start: formatDateInputValue(defaultStart), end: formatDateInputValue(defaultEnd) };
-    if (typeof window === "undefined") return fallback;
-    const saved = window.localStorage.getItem("rangeSelection");
-    if (!saved) return fallback;
-    try {
-      const parsed = JSON.parse(saved) as { mode?: "preset" | "custom"; days?: number; start?: string; end?: string };
-      if (!parsed || (parsed.mode !== "preset" && parsed.mode !== "custom")) return fallback;
-      return {
-        mode: parsed.mode,
-        days: Number.isFinite(parsed.days) ? Math.max(1, Number(parsed.days)) : fallback.days,
-        start: parsed.start || fallback.start,
-        end: parsed.end || fallback.end
-      };
-    } catch (err) {
-      console.warn("Failed to parse saved rangeSelection", err);
-      return fallback;
-    }
-  });
-  const [rangeMode, setRangeMode] = useState<"preset" | "custom">(rangeInit.mode);
-  const [rangeDays, setRangeDays] = useState(rangeInit.days);
-  const [customStart, setCustomStart] = useState(rangeInit.start);
-  const [customEnd, setCustomEnd] = useState(rangeInit.end);
-  const [appliedDays, setAppliedDays] = useState(rangeInit.days);
   const [customPickerOpen, setCustomPickerOpen] = useState(false);
-  const [customDraftStart, setCustomDraftStart] = useState(rangeInit.start);
-  const [customDraftEnd, setCustomDraftEnd] = useState(rangeInit.end);
+  const [customDraftStart, setCustomDraftStart] = useState(fallbackRange.start);
+  const [customDraftEnd, setCustomDraftEnd] = useState(fallbackRange.end);
   const [customError, setCustomError] = useState<string | null>(null);
   const customPickerRef = useRef<HTMLDivElement | null>(null);
   const [hourRange, setHourRange] = useState<"all" | "24h" | "72h">("all");
@@ -192,6 +195,15 @@ export default function DashboardPage() {
   const pieLegendClearTimerRef = useRef<number | null>(null);
   const syncingRef = useRef(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [syncingPrices, setSyncingPrices] = useState(false);
+  const [pricesSyncStatus, setPricesSyncStatus] = useState<string | null>(null);
+  const pricesSyncStatusTimerRef = useRef<number | null>(null);
+  const [pricesSyncModalOpen, setPricesSyncModalOpen] = useState(false);
+  const [pricesSyncData, setPricesSyncData] = useState<{
+    summary?: { total: number; updated: number; skipped: number; failed: number };
+    details?: { model: string; status: string; reason?: string; matchedWith?: string }[];
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -507,6 +519,53 @@ export default function DashboardPage() {
       setSyncing(false);
     }
   }, []);
+
+  // 同步模型价格
+  const syncModelPrices = useCallback(async () => {
+    if (syncingPrices) return;
+    
+    // 从 routeOptions 获取第一个 API Key，如果用户手动输入了则优先使用
+    const apiKey = filterRouteInput.trim() || (routeOptions.length > 0 ? routeOptions[0] : "");
+    if (!apiKey) {
+      setPricesSyncStatus("未找到可用的 API Key，请确保系统已加载数据");
+      setPricesSyncData({ error: "未找到可用的 API Key" });
+      setPricesSyncModalOpen(true);
+      if (pricesSyncStatusTimerRef.current) clearTimeout(pricesSyncStatusTimerRef.current);
+      pricesSyncStatusTimerRef.current = window.setTimeout(() => setPricesSyncStatus(null), 5000);
+      return;
+    }
+
+    setSyncingPrices(true);
+    setPricesSyncStatus(null);
+    setPricesSyncData(null);
+    setPricesSyncModalOpen(true);
+
+    try {
+      const res = await fetch("/api/sync-model-prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey })
+      });
+
+      const data = await res.json();
+      setPricesSyncData(data);
+      
+      if (!res.ok) {
+        setPricesSyncStatus(`价格同步失败: ${data.error || res.statusText}`);
+      } else {
+        const { summary } = data;
+        setPricesSyncStatus(`已更新 ${summary.updated} 个模型价格，跳过 ${summary.skipped} 个，失败 ${summary.failed} 个`);
+      }
+    } catch (err) {
+      const errorMsg = (err as Error).message;
+      setPricesSyncStatus(`价格同步失败: ${errorMsg}`);
+      setPricesSyncData({ error: errorMsg });
+    } finally {
+      setSyncingPrices(false);
+      if (pricesSyncStatusTimerRef.current) clearTimeout(pricesSyncStatusTimerRef.current);
+      pricesSyncStatusTimerRef.current = window.setTimeout(() => setPricesSyncStatus(null), 8000);
+    }
+  }, [filterRouteInput, routeOptions, syncingPrices]);
 
   // 页面加载时仅在当前会话首次进入时自动同步一次
   useEffect(() => {
@@ -906,6 +965,21 @@ export default function DashboardPage() {
             {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
           <button
+            onClick={syncModelPrices}
+            disabled={syncingPrices}
+            className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+              syncingPrices
+                ? darkMode
+                  ? "cursor-not-allowed border-slate-700 bg-slate-800 text-slate-500"
+                  : "cursor-not-allowed border-slate-300 bg-slate-200 text-slate-500"
+                : "border-emerald-500/50 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30"
+            }`}
+            title="从 models.dev 获取最新模型价格并更新到 CLIProxyAPI"
+          >
+            <DollarSign className={`h-4 w-4 ${syncingPrices ? "animate-pulse" : ""}`} />
+            {syncingPrices ? "同步中..." : "模型价格"}
+          </button>
+          <button
             onClick={() => doSync(true)}
             disabled={syncing}
             className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
@@ -924,9 +998,9 @@ export default function DashboardPage() {
               <Activity className="h-4 w-4" />
               {loadingOverview ? "加载中..." : overview ? "实时数据" : "暂无数据"}
             </div>
-            {lastSyncTime && (
-              <span className={`text-xs ${darkMode ? "text-slate-500" : "text-slate-500"}`} suppressHydrationWarning>
-                上次同步: {mounted ? lastSyncTime.toLocaleTimeString() : "--:--:--"}
+            {mounted && lastSyncTime && (
+              <span className={`text-xs ${darkMode ? "text-slate-500" : "text-slate-500"}`}>
+                上次同步: {lastSyncTime.toLocaleTimeString()}
               </span>
             )}
           </div>
@@ -2432,6 +2506,111 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {pricesSyncStatus && (
+        <div
+          onClick={() => setPricesSyncStatus(null)}
+          className={`fixed right-6 top-40 z-50 max-w-[340px] cursor-pointer rounded-lg border px-4 py-3 shadow-lg transition-opacity hover:opacity-90 animate-toast-in ${
+            pricesSyncStatus.includes("失败") || pricesSyncStatus.includes("请先")
+              ? darkMode
+                ? "border-rose-500/30 bg-rose-950/60 text-rose-200"
+                : "border-rose-300 bg-rose-50 text-rose-800"
+              : darkMode
+              ? "border-emerald-500/40 bg-emerald-900/80 text-emerald-100"
+              : "border-emerald-400 bg-emerald-50 text-emerald-900"
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl animate-emoji-pop">
+              {pricesSyncStatus.includes("失败") || pricesSyncStatus.includes("请先") ? "💰" : "✅"}
+            </span>
+            <span className="text-sm font-medium">{pricesSyncStatus}</span>
+          </div>
+        </div>
+      )}
+
+      {/* 模型价格同步详情弹窗 */}
+      <Modal
+        isOpen={pricesSyncModalOpen}
+        onClose={() => setPricesSyncModalOpen(false)}
+        title="模型价格同步详情"
+        darkMode={darkMode}
+        className="max-w-3xl"
+      >
+        <div className="max-h-[70vh] overflow-auto">
+          {syncingPrices && (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+              <span className="ml-3 text-slate-400">正在同步价格...</span>
+            </div>
+          )}
+          
+          {pricesSyncData && !syncingPrices && (
+            <div className="space-y-4">
+              {/* 摘要 */}
+              {pricesSyncData.summary && (
+                <div className="flex flex-wrap gap-3 text-sm">
+                  <div className={`px-3 py-1 rounded ${darkMode ? "bg-slate-700" : "bg-slate-200"}`}>
+                    总计: <span className="font-semibold">{pricesSyncData.summary.total}</span>
+                  </div>
+                  <div className="px-3 py-1 rounded bg-emerald-500/20 text-emerald-400">
+                    已更新: <span className="font-semibold">{pricesSyncData.summary.updated}</span>
+                  </div>
+                  <div className="px-3 py-1 rounded bg-yellow-500/20 text-yellow-400">
+                    跳过: <span className="font-semibold">{pricesSyncData.summary.skipped}</span>
+                  </div>
+                  <div className="px-3 py-1 rounded bg-red-500/20 text-red-400">
+                    失败: <span className="font-semibold">{pricesSyncData.summary.failed}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* 详细结果 */}
+              {pricesSyncData.details && pricesSyncData.details.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className={`border-b ${darkMode ? "border-slate-700" : "border-slate-300"}`}>
+                        <th className="py-2 px-2 text-left">模型</th>
+                        <th className="py-2 px-2 text-left">状态</th>
+                        <th className="py-2 px-2 text-left">匹配到</th>
+                        <th className="py-2 px-2 text-left">原因</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pricesSyncData.details.map((d, i) => (
+                        <tr key={i} className={`border-b ${darkMode ? "border-slate-700/50" : "border-slate-200"}`}>
+                          <td className="py-1.5 px-2 font-mono">{d.model}</td>
+                          <td className="py-1.5 px-2">
+                            <span className={`px-1.5 py-0.5 rounded text-xs ${
+                              d.status === "updated" ? "bg-emerald-500/20 text-emerald-400" :
+                              d.status === "skipped" ? "bg-yellow-500/20 text-yellow-400" :
+                              "bg-red-500/20 text-red-400"
+                            }`}>
+                              {d.status === "updated" ? "✓" : d.status === "skipped" ? "⊘" : "✗"}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2 font-mono text-emerald-400">{d.matchedWith || "-"}</td>
+                          <td className="py-1.5 px-2 text-slate-500 max-w-xs truncate" title={d.reason}>
+                            {d.reason || "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* 错误信息 */}
+              {pricesSyncData.error && (
+                <div className="rounded-lg p-4 bg-red-500/10 border border-red-500/30">
+                  <p className="text-sm text-red-300">{pricesSyncData.error}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Modal>
     </main>
   );
 }
