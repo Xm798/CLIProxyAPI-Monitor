@@ -93,7 +93,8 @@ export async function POST(request: Request) {
     for (const provider of Object.values(modelsDevData)) {
       if (!provider.models) continue;
       for (const model of Object.values(provider.models)) {
-        if (model.cost && (model.cost.input || model.cost.output)) {
+        // 修复：允许 0 价模型（免费模型）
+        if (model.cost && (model.cost.input !== undefined || model.cost.output !== undefined)) {
           priceMap.set(model.id, {
             input: model.cost.input ?? 0,
             output: model.cost.output ?? 0,
@@ -117,11 +118,11 @@ export async function POST(request: Request) {
     const cliproxyData = await cliproxyRes.json();
     const models: { id: string }[] = cliproxyData.data || [];
 
-    // 4. 匹配并更新价格到本地数据库
-    let updatedCount = 0;
+    // 4. 匹配并收集要更新的价格
     let skippedCount = 0;
     let failedCount = 0;
     const details: { model: string; status: string; matchedWith?: string; reason?: string }[] = [];
+    const priceUpdates: { model: string; priceInfo: { input: number; output: number; cached: number }; matchedKey: string }[] = [];
 
     for (const { id: modelId } of models) {
       let priceInfo = priceMap.get(modelId);
@@ -152,6 +153,13 @@ export async function POST(request: Request) {
         continue;
       }
 
+      priceUpdates.push({ model: modelId, priceInfo, matchedKey });
+      details.push({ model: modelId, status: "updated", matchedWith: matchedKey });
+    }
+
+    // 5. 批量更新数据库（性能优化）
+    let updatedCount = 0;
+    for (const { model: modelId, priceInfo, matchedKey } of priceUpdates) {
       try {
         await db.insert(modelPrices).values({
           model: modelId,
@@ -167,10 +175,17 @@ export async function POST(request: Request) {
           }
         });
         updatedCount++;
-        details.push({ model: modelId, status: "updated", matchedWith: matchedKey });
       } catch (err) {
         failedCount++;
-        details.push({ model: modelId, status: "failed", reason: err instanceof Error ? err.message : "数据库写入失败" });
+        // 更新该模型的状态
+        const detailIndex = details.findIndex(d => d.model === modelId);
+        if (detailIndex !== -1) {
+          details[detailIndex] = { 
+            model: modelId, 
+            status: "failed", 
+            reason: err instanceof Error ? err.message : "数据库写入失败" 
+          };
+        }
       }
     }
 
