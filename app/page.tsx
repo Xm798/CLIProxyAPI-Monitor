@@ -548,6 +548,29 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // 加载价格配置
+  const loadPrices = useCallback(async () => {
+    try {
+      const res = await fetch("/api/prices", { cache: "no-store" });
+      if (!res.ok) return;
+      const data: ModelPrice[] = await res.json();
+      setPrices(
+        data.map((p) => ({
+          model: p.model,
+          inputPricePer1M: Number(p.inputPricePer1M),
+          cachedInputPricePer1M: Number(p.cachedInputPricePer1M),
+          outputPricePer1M: Number(p.outputPricePer1M)
+        }))
+      );
+    } catch (err) {
+      console.warn("Failed to load prices", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPrices();
+  }, [loadPrices]);
+
   // 同步模型价格
   const syncModelPrices = useCallback(async () => {
     if (syncingPrices) return;
@@ -579,6 +602,8 @@ export default function DashboardPage() {
           message: `已更新 ${summary.updated} 个模型价格，跳过 ${summary.skipped} 个，失败 ${summary.failed} 个`,
           summary: summary
         });
+        // 同步成功后重新加载价格列表
+        await loadPrices();
       }
     } catch (err) {
       const errorMsg = (err as Error).message;
@@ -590,7 +615,7 @@ export default function DashboardPage() {
     } finally {
       setSyncingPrices(false);
     }
-  }, [syncingPrices]);
+  }, [syncingPrices, loadPrices]);
 
   // 页面加载时仅在当前会话首次进入时自动同步一次
   useEffect(() => {
@@ -642,27 +667,6 @@ export default function DashboardPage() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [customPickerOpen]);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch("/api/prices", { cache: "no-store" });
-        if (!res.ok) return;
-        const data: ModelPrice[] = await res.json();
-        setPrices(
-          data.map((p) => ({
-            model: p.model,
-            inputPricePer1M: Number(p.inputPricePer1M),
-            cachedInputPricePer1M: Number(p.cachedInputPricePer1M),
-            outputPricePer1M: Number(p.outputPricePer1M)
-          }))
-        );
-      } catch (err) {
-        console.warn("Failed to load prices", err);
-      }
-    };
-    load();
-  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -1855,6 +1859,7 @@ export default function DashboardPage() {
                   value={priceSearchQuery}
                   onChange={(e) => setPriceSearchQuery(e.target.value)}
                   className={`w-full rounded-lg border py-2 pl-10 pr-3 text-sm focus:border-indigo-500 focus:outline-none ${darkMode ? "border-slate-700 bg-slate-900 text-white placeholder-slate-500" : "border-slate-300 bg-white text-slate-900 placeholder-slate-400"}`}
+                  aria-label="搜索模型价格"
                 />
                 {priceSearchQuery && (
                   <button
