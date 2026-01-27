@@ -4,9 +4,16 @@ import { useEffect, useState, useCallback, useMemo, useRef, startTransition, typ
 import { ResponsiveContainer, LineChart, Line, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, Legend, ComposedChart, PieChart, Pie, Cell } from "recharts";
 import type { TooltipProps } from "recharts";
 import { formatCurrency, formatNumber, formatCompactNumber, formatNumberWithCommas, formatHourLabel } from "@/lib/utils";
-import { AlertTriangle, Info, LucideIcon, Activity, Save, RefreshCw, Moon, Sun, Pencil, Trash2, Maximize2, CalendarRange, X } from "lucide-react";
+import { AlertTriangle, Info, LucideIcon, Activity, Save, RefreshCw, Moon, Sun, Pencil, Trash2, Maximize2, CalendarRange, X, DollarSign, Search } from "lucide-react";
 import type { ModelPrice, UsageOverview, UsageSeriesPoint } from "@/lib/types";
 import { Modal } from "@/app/components/Modal";
+
+// 同步状态类型定义
+type SyncStatus = 
+  | { type: 'idle' }
+  | { type: 'syncing'; message?: string }
+  | { type: 'success'; message: string; summary?: { total: number; updated: number; skipped: number; failed: number } }
+  | { type: 'error'; message: string };
 
 // 饼图颜色
 const PIE_COLORS = [
@@ -110,42 +117,45 @@ export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [prices, setPrices] = useState<ModelPrice[]>([]);
 
+  // 默认值 - 服务端和客户端首次渲染使用相同值
+  const defaultEnd = new Date();
+  const defaultStart = new Date(defaultEnd.getTime() - 6 * DAY_MS);
+  const fallbackRange = { mode: "preset" as const, days: 14, start: formatDateInputValue(defaultStart), end: formatDateInputValue(defaultEnd) };
+
+  const [rangeMode, setRangeMode] = useState<"preset" | "custom">(fallbackRange.mode);
+  const [rangeDays, setRangeDays] = useState(fallbackRange.days);
+  const [customStart, setCustomStart] = useState(fallbackRange.start);
+  const [customEnd, setCustomEnd] = useState(fallbackRange.end);
+  const [appliedDays, setAppliedDays] = useState(fallbackRange.days);
+
   useEffect(() => {
     setMounted(true);
+    // 客户端挂载后从 localStorage 恢复用户选择
+    const saved = window.localStorage.getItem("rangeSelection");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as { mode?: "preset" | "custom"; days?: number; start?: string; end?: string };
+        if (parsed && (parsed.mode === "preset" || parsed.mode === "custom")) {
+          setRangeMode(parsed.mode);
+          if (Number.isFinite(parsed.days)) {
+            setRangeDays(Math.max(1, Number(parsed.days)));
+            setAppliedDays(Math.max(1, Number(parsed.days)));
+          }
+          if (parsed.start) setCustomStart(parsed.start);
+          if (parsed.end) setCustomEnd(parsed.end);
+        }
+      } catch (err) {
+        console.warn("Failed to parse saved rangeSelection", err);
+      }
+    }
   }, []);
   const [overview, setOverview] = useState<UsageOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [overviewEmpty, setOverviewEmpty] = useState(false);
   const [loadingOverview, setLoadingOverview] = useState(true);
-  const [rangeInit] = useState(() => {
-    const defaultEnd = new Date();
-    const defaultStart = new Date(defaultEnd.getTime() - 6 * DAY_MS);
-    const fallback = { mode: "preset" as const, days: 14, start: formatDateInputValue(defaultStart), end: formatDateInputValue(defaultEnd) };
-    if (typeof window === "undefined") return fallback;
-    const saved = window.localStorage.getItem("rangeSelection");
-    if (!saved) return fallback;
-    try {
-      const parsed = JSON.parse(saved) as { mode?: "preset" | "custom"; days?: number; start?: string; end?: string };
-      if (!parsed || (parsed.mode !== "preset" && parsed.mode !== "custom")) return fallback;
-      return {
-        mode: parsed.mode,
-        days: Number.isFinite(parsed.days) ? Math.max(1, Number(parsed.days)) : fallback.days,
-        start: parsed.start || fallback.start,
-        end: parsed.end || fallback.end
-      };
-    } catch (err) {
-      console.warn("Failed to parse saved rangeSelection", err);
-      return fallback;
-    }
-  });
-  const [rangeMode, setRangeMode] = useState<"preset" | "custom">(rangeInit.mode);
-  const [rangeDays, setRangeDays] = useState(rangeInit.days);
-  const [customStart, setCustomStart] = useState(rangeInit.start);
-  const [customEnd, setCustomEnd] = useState(rangeInit.end);
-  const [appliedDays, setAppliedDays] = useState(rangeInit.days);
   const [customPickerOpen, setCustomPickerOpen] = useState(false);
-  const [customDraftStart, setCustomDraftStart] = useState(rangeInit.start);
-  const [customDraftEnd, setCustomDraftEnd] = useState(rangeInit.end);
+  const [customDraftStart, setCustomDraftStart] = useState(fallbackRange.start);
+  const [customDraftEnd, setCustomDraftEnd] = useState(fallbackRange.end);
   const [customError, setCustomError] = useState<string | null>(null);
   const customPickerRef = useRef<HTMLDivElement | null>(null);
   const [hourRange, setHourRange] = useState<"all" | "24h" | "72h">("all");
@@ -192,6 +202,15 @@ export default function DashboardPage() {
   const pieLegendClearTimerRef = useRef<number | null>(null);
   const syncingRef = useRef(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [syncingPrices, setSyncingPrices] = useState(false);
+  // const [pricesSyncStatus, setPricesSyncStatus] = useState<SyncStatus>({ type: 'idle' }); // 已禁用 toast 通知
+  // const pricesSyncStatusTimerRef = useRef<number | null>(null); // 已禁用 toast 通知
+  const [pricesSyncModalOpen, setPricesSyncModalOpen] = useState(false);
+  const [pricesSyncData, setPricesSyncData] = useState<{
+    summary?: { total: number; updated: number; skipped: number; failed: number };
+    details?: { model: string; status: string; reason?: string; matchedWith?: string }[];
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -431,6 +450,29 @@ export default function DashboardPage() {
     };
   }, [saveStatus, closeSaveStatus]);
 
+  // 自动清除 pricesSyncStatus toast - 已禁用
+  /*
+  useEffect(() => {
+    if (pricesSyncStatus.type === 'idle') return;
+    
+    if (pricesSyncStatusTimerRef.current !== null) {
+      window.clearTimeout(pricesSyncStatusTimerRef.current);
+    }
+    
+    pricesSyncStatusTimerRef.current = window.setTimeout(() => {
+      setPricesSyncStatus({ type: 'idle' });
+      pricesSyncStatusTimerRef.current = null;
+    }, 8000);
+    
+    return () => {
+      if (pricesSyncStatusTimerRef.current !== null) {
+        window.clearTimeout(pricesSyncStatusTimerRef.current);
+        pricesSyncStatusTimerRef.current = null;
+      }
+    };
+  }, [pricesSyncStatus]);
+  */
+
   const applyTheme = useCallback((nextDark: boolean) => {
     setDarkMode(nextDark);
     if (typeof document !== "undefined") {
@@ -508,6 +550,75 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // 加载价格配置
+  const loadPrices = useCallback(async () => {
+    try {
+      const res = await fetch("/api/prices", { cache: "no-store" });
+      if (!res.ok) return;
+      const data: ModelPrice[] = await res.json();
+      setPrices(
+        data.map((p) => ({
+          model: p.model,
+          inputPricePer1M: Number(p.inputPricePer1M),
+          cachedInputPricePer1M: Number(p.cachedInputPricePer1M),
+          outputPricePer1M: Number(p.outputPricePer1M)
+        }))
+      );
+    } catch (err) {
+      console.warn("Failed to load prices", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPrices();
+  }, [loadPrices]);
+
+  // 同步模型价格
+  const syncModelPrices = useCallback(async () => {
+    if (syncingPrices) return;
+
+    setSyncingPrices(true);
+    // setPricesSyncStatus({ type: 'syncing' }); // 已禁用 toast 通知
+    setPricesSyncData(null);
+    setPricesSyncModalOpen(true);
+
+    try {
+      const res = await fetch("/api/sync-model-prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+
+      const data = await res.json();
+      setPricesSyncData(data);
+      
+      if (!res.ok) {
+        // setPricesSyncStatus({ 
+        //   type: 'error', 
+        //   message: `价格同步失败: ${data.error || res.statusText}` 
+        // }); // 已禁用 toast 通知
+      } else {
+        const { summary } = data;
+        // setPricesSyncStatus({ 
+        //   type: 'success', 
+        //   message: `已更新 ${summary.updated} 个模型价格，跳过 ${summary.skipped} 个，失败 ${summary.failed} 个`,
+        //   summary: summary
+        // }); // 已禁用 toast 通知
+        // 同步成功后重新加载价格列表
+        await loadPrices();
+      }
+    } catch (err) {
+      const errorMsg = (err as Error).message;
+      // setPricesSyncStatus({ 
+      //   type: 'error', 
+      //   message: `价格同步失败: ${errorMsg}` 
+      // }); // 已禁用 toast 通知
+      setPricesSyncData({ error: errorMsg });
+    } finally {
+      setSyncingPrices(false);
+    }
+  }, [syncingPrices, loadPrices]);
+
   // 页面加载时仅在当前会话首次进入时自动同步一次
   useEffect(() => {
     let active = true;
@@ -558,27 +669,6 @@ export default function DashboardPage() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [customPickerOpen]);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch("/api/prices", { cache: "no-store" });
-        if (!res.ok) return;
-        const data: ModelPrice[] = await res.json();
-        setPrices(
-          data.map((p) => ({
-            model: p.model,
-            inputPricePer1M: Number(p.inputPricePer1M),
-            cachedInputPricePer1M: Number(p.cachedInputPricePer1M),
-            outputPricePer1M: Number(p.outputPricePer1M)
-          }))
-        );
-      } catch (err) {
-        console.warn("Failed to load prices", err);
-      }
-    };
-    load();
-  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -659,13 +749,40 @@ export default function DashboardPage() {
     { key: "72h", label: "最近 72 小时" }
   ];
 
+  // 未配置价格的模型选项（排除已有价格的模型）
   const priceModelOptions = useMemo(() => {
-    const names = new Set<string>();
-    modelOptions.forEach((m) => names.add(m));
-    prices.forEach((p) => names.add(p.model));
-    overviewData?.models?.forEach((m) => names.add(m.model));
-    return Array.from(names);
+    const configuredModels = new Set(prices.map(p => p.model));
+    const allModels = new Set<string>();
+    modelOptions.forEach((m) => allModels.add(m));
+    overviewData?.models?.forEach((m) => allModels.add(m.model));
+    return Array.from(allModels).filter(m => !configuredModels.has(m));
   }, [modelOptions, prices, overviewData?.models]);
+
+  // 已配置价格搜索和宽度计算
+  const [priceSearchQuery, setPriceSearchQuery] = useState("");
+  const { filteredPrices, badgeWidths } = useMemo(() => {
+    const filtered = priceSearchQuery.trim() 
+      ? prices.filter(p => p.model.toLowerCase().includes(priceSearchQuery.toLowerCase()))
+      : prices;
+    
+    // 计算全局每列的最大宽度
+    if (filtered.length === 0) {
+      return { filteredPrices: filtered, badgeWidths: { input: 90, cached: 90, output: 90 } };
+    }
+    
+    const maxInputLen = Math.max(...filtered.map(p => String(p.inputPricePer1M).length));
+    const maxCachedLen = Math.max(...filtered.map(p => String(p.cachedInputPricePer1M).length));
+    const maxOutputLen = Math.max(...filtered.map(p => String(p.outputPricePer1M).length));
+    
+    return {
+      filteredPrices: filtered,
+      badgeWidths: {
+        input: Math.max(90, 70 + maxInputLen * 8),
+        cached: Math.max(90, 70 + maxCachedLen * 8),
+        output: Math.max(90, 70 + maxOutputLen * 8)
+      }
+    };
+  }, [prices, priceSearchQuery]);
 
   const sortedModelsByCost = useMemo(() => {
     const models = overviewData?.models ?? [];
@@ -924,9 +1041,9 @@ export default function DashboardPage() {
               <Activity className="h-4 w-4" />
               {loadingOverview ? "加载中..." : overview ? "实时数据" : "暂无数据"}
             </div>
-            {lastSyncTime && (
-              <span className={`text-xs ${darkMode ? "text-slate-500" : "text-slate-500"}`} suppressHydrationWarning>
-                上次同步: {mounted ? lastSyncTime.toLocaleTimeString() : "--:--:--"}
+            {mounted && lastSyncTime && (
+              <span className={`text-xs ${darkMode ? "text-slate-500" : "text-slate-500"}`}>
+                上次同步: {lastSyncTime.toLocaleTimeString()}
               </span>
             )}
           </div>
@@ -1739,16 +1856,48 @@ export default function DashboardPage() {
               <h2 className={`text-lg font-semibold ${darkMode ? "text-white" : "text-slate-900"}`}>模型价格配置</h2>
               <p className={`text-xs ${darkMode ? "text-slate-400" : "text-slate-500"}`}>设置每百万 tokens 单价，费用计算将立即更新</p>
             </div>
-            {status ? (
-              <p className={`text-xs ${status === "已保存" ? "text-emerald-400" : "text-red-400"}`}>
-                {status}
-              </p>
-            ) : null}
+            <div className="flex w-full flex-col gap-4 md:w-3/5 md:flex-row md:items-center md:justify-end">
+              <div className="relative w-full md:max-w-[360px]">
+                <Search className={`absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${darkMode ? "text-slate-500" : "text-slate-400"}`} />
+                <input
+                  type="text"
+                  placeholder="搜索已配置的模型..."
+                  value={priceSearchQuery}
+                  onChange={(e) => setPriceSearchQuery(e.target.value)}
+                  className={`w-full rounded-lg border py-2 pl-10 pr-3 text-sm focus:border-indigo-500 focus:outline-none ${darkMode ? "border-slate-700 bg-slate-900 text-white placeholder-slate-500" : "border-slate-300 bg-white text-slate-900 placeholder-slate-400"}`}
+                  aria-label="搜索模型价格"
+                />
+                {priceSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setPriceSearchQuery("")}
+                    className={`absolute right-3 top-1/2 -translate-y-1/2 ${darkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"}`}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={syncModelPrices}
+                disabled={syncingPrices}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                  syncingPrices
+                    ? darkMode
+                      ? "cursor-not-allowed border-slate-700 bg-slate-800 text-slate-500"
+                      : "cursor-not-allowed border-slate-300 bg-slate-200 text-slate-500"
+                    : "border-emerald-500/50 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30"
+                }`}
+                title="从 models.dev 获取最新模型价格并更新到面板"
+              >
+                <DollarSign className={`h-4 w-4 ${syncingPrices ? "animate-pulse" : ""}`} />
+                {syncingPrices ? "同步中..." : "更新价格"}
+              </button>
+            </div>
           </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-5">
           <form onSubmit={handleSubmit} className={`rounded-xl border p-5 lg:col-span-2 ${darkMode ? "border-slate-700 bg-slate-800/50" : "border-slate-200 bg-slate-50"}`}>
-            <div className="grid gap-4">
+            <div className="grid gap-6">
               <label className={`text-sm font-medium ${darkMode ? "text-slate-300" : "text-slate-700"}`}>
                 模型名称
                 <ComboBox
@@ -1805,16 +1954,25 @@ export default function DashboardPage() {
           </form>
 
           <div className="lg:col-span-3">
-            <div className="scrollbar-slim grid max-h-[400px] gap-3 overflow-y-auto pr-1">
-              {prices.length ? prices.map((price) => (
+            <div className="scrollbar-slim grid max-h-[420px] gap-3 overflow-y-auto pr-1">
+              {filteredPrices.length ? filteredPrices.map((price) => (
                 <div key={price.model} className={`flex items-center justify-between rounded-xl border px-4 py-3 ${darkMode ? "border-slate-700 bg-slate-800/50" : "border-slate-200 bg-slate-50"}`}>
                   <div>
                     <p className={`text-base font-semibold ${darkMode ? "text-white" : "text-slate-900"}`}>{price.model}</p>
-                    <p className={`text-sm ${darkMode ? "text-slate-400" : "text-slate-600"}`}>
-                      ${price.inputPricePer1M}/M 输入
-                      {price.cachedInputPricePer1M > 0 && ` • $${price.cachedInputPricePer1M}/M 缓存`}
-                      {" • "}${price.outputPricePer1M}/M 输出
-                    </p>
+                    <div className="mt-1 grid grid-cols-3 gap-2 text-xs">
+                      <span className={`inline-flex items-center justify-between rounded-full px-2 py-0.5 ${darkMode ? "bg-rose-500/15 text-rose-200" : "bg-rose-100 text-rose-700"}`} style={{ width: `${badgeWidths.input}px` }}>
+                        <span>输入</span>
+                        <span className="font-semibold tabular-nums">${price.inputPricePer1M}/M</span>
+                      </span>
+                      <span className={`inline-flex items-center justify-between rounded-full px-2 py-0.5 ${darkMode ? "bg-amber-500/15 text-amber-200" : "bg-amber-100 text-amber-700"}`} style={{ width: `${badgeWidths.cached}px` }}>
+                        <span>缓存</span>
+                        <span className="font-semibold tabular-nums">${price.cachedInputPricePer1M}/M</span>
+                      </span>
+                      <span className={`inline-flex items-center justify-between rounded-full px-2 py-0.5 ${darkMode ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-100 text-emerald-700"}`} style={{ width: `${badgeWidths.output}px` }}>
+                        <span>输出</span>
+                        <span className="font-semibold tabular-nums">${price.outputPricePer1M}/M</span>
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -1837,7 +1995,9 @@ export default function DashboardPage() {
                 </div>
               )) : (
                 <div className={`flex flex-col items-center justify-center rounded-xl border border-dashed py-8 text-center ${darkMode ? "border-slate-700 bg-slate-800/30" : "border-slate-300 bg-slate-50"}`}>
-                  <p className="text-base text-slate-400">暂无已配置价格</p>
+                  <p className="text-base text-slate-400">
+                    {priceSearchQuery ? "未找到匹配的模型" : "暂无已配置价格"}
+                  </p>
                 </div>
               )}
             </div>
@@ -2418,7 +2578,7 @@ export default function DashboardPage() {
       {saveStatus && (
         <div
           onClick={() => closeSaveStatus()}
-          className={`fixed right-6 top-24 z-50 max-w-[290px] cursor-pointer rounded-lg border px-4 py-3 shadow-lg transition-opacity hover:opacity-90 ${
+          className={`fixed right-6 top-36 z-50 max-w-[290px] cursor-pointer rounded-lg border px-4 py-3 shadow-lg transition-opacity hover:opacity-90 ${
             saveStatusClosing ? "animate-toast-out" : "animate-toast-in"
           } ${
             darkMode
@@ -2432,6 +2592,136 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* TODO: 价格同步 toast 通知已禁用，详情请查看弹窗
+      {pricesSyncStatus.type !== 'idle' && (
+        <div
+          onClick={() => setPricesSyncStatus({ type: 'idle' })}
+          className={`fixed right-6 top-48 z-50 max-w-[340px] cursor-pointer rounded-lg border px-4 py-3 shadow-lg transition-opacity hover:opacity-90 animate-toast-in ${
+            pricesSyncStatus.type === 'error'
+              ? darkMode
+                ? "border-rose-500/30 bg-rose-950/60 text-rose-200"
+                : "border-rose-300 bg-rose-50 text-rose-800"
+              : darkMode
+              ? "border-emerald-500/40 bg-emerald-900/80 text-emerald-100"
+              : "border-emerald-400 bg-emerald-50 text-emerald-900"
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl animate-emoji-pop">
+              {pricesSyncStatus.type === 'error' ? "💰" : pricesSyncStatus.type === 'syncing' ? "⏳" : "✅"}
+            </span>
+            <span className="text-sm font-medium">
+              {pricesSyncStatus.type === 'syncing' 
+                ? (pricesSyncStatus.message || '正在同步...') 
+                : pricesSyncStatus.message
+              }
+            </span>
+          </div>
+        </div>
+      )}
+      */}
+
+      {/* 模型价格同步详情弹窗 */}
+      <Modal
+        isOpen={pricesSyncModalOpen}
+        onClose={() => setPricesSyncModalOpen(false)}
+        title="模型价格同步详情"
+        darkMode={darkMode}
+        className="max-w-3xl"
+      >
+        <div className="max-h-[70vh] overflow-auto">
+          {syncingPrices && (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-500"></div>
+              <span className={`ml-4 text-base ${darkMode ? "text-slate-300" : "text-slate-600"}`}>正在同步价格...</span>
+            </div>
+          )}
+          
+          {pricesSyncData && !syncingPrices && (
+            <>
+              {/* 错误信息优先显示 */}
+              {pricesSyncData.error && (
+                <div className={`rounded-xl p-6 border-2 ${darkMode ? "bg-red-950/30 border-red-500/40" : "bg-red-50 border-red-300"}`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`flex-shrink-0 p-2 rounded-lg ${darkMode ? "bg-red-900/40" : "bg-red-200"}`}>
+                      <AlertTriangle className={`h-6 w-6 ${darkMode ? "text-red-400" : "text-red-600"}`} />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className={`text-lg font-semibold mb-2 ${darkMode ? "text-red-300" : "text-red-900"}`}>
+                        同步失败
+                      </h3>
+                      <p className={`text-sm leading-relaxed ${darkMode ? "text-red-200/90" : "text-red-800"}`}>
+                        {pricesSyncData.error}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 摘要 */}
+              {pricesSyncData.summary && !pricesSyncData.error && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className={`rounded-xl border p-4 ${darkMode ? "bg-slate-800/50 border-slate-700" : "bg-slate-50 border-slate-200"}`}>
+                      <p className={`text-xs mb-1 ${darkMode ? "text-slate-400" : "text-slate-500"}`}>总计</p>
+                      <p className={`text-2xl font-bold ${darkMode ? "text-white" : "text-slate-900"}`}>{pricesSyncData.summary.total}</p>
+                    </div>
+                    <div className="rounded-xl border p-4 bg-emerald-500/10 border-emerald-500/30">
+                      <p className="text-xs mb-1 text-emerald-400">已更新</p>
+                      <p className="text-2xl font-bold text-emerald-400">{pricesSyncData.summary.updated}</p>
+                    </div>
+                    <div className="rounded-xl border p-4 bg-yellow-500/10 border-yellow-500/30">
+                      <p className="text-xs mb-1 text-yellow-400">跳过</p>
+                      <p className="text-2xl font-bold text-yellow-400">{pricesSyncData.summary.skipped}</p>
+                    </div>
+                    <div className="rounded-xl border p-4 bg-red-500/10 border-red-500/30">
+                      <p className="text-xs mb-1 text-red-400">失败</p>
+                      <p className="text-2xl font-bold text-red-400">{pricesSyncData.summary.failed}</p>
+                    </div>
+                  </div>
+
+                  {/* 详细结果 */}
+                  {pricesSyncData.details && pricesSyncData.details.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className={`border-b ${darkMode ? "border-slate-700" : "border-slate-300"}`}>
+                        <th className="py-2 px-2 text-left">模型</th>
+                        <th className="py-2 px-2 text-left">状态</th>
+                        <th className="py-2 px-2 text-left">匹配到</th>
+                        <th className="py-2 px-2 text-left">原因</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pricesSyncData.details.map((d, i) => (
+                        <tr key={i} className={`border-b ${darkMode ? "border-slate-700/50" : "border-slate-200"}`}>
+                          <td className="py-1.5 px-2 font-mono">{d.model}</td>
+                          <td className="py-1.5 px-2">
+                            <span className={`inline-flex items-center justify-center w-6 h-4.5 rounded text-xs ${
+                              d.status === "updated" ? "bg-emerald-500/20 text-emerald-400" :
+                              d.status === "skipped" ? "bg-yellow-500/20 text-yellow-400" :
+                              "bg-red-500/20 text-red-400"
+                            }`}>
+                              {d.status === "updated" ? "✓" : d.status === "skipped" ? "⊘" : "✗"}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2 font-mono text-emerald-400">{d.matchedWith || "-"}</td>
+                          <td className="py-1.5 px-2 text-slate-500 max-w-xs truncate" title={d.reason}>
+                            {d.reason || "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </Modal>
     </main>
   );
 }

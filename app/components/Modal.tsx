@@ -49,7 +49,7 @@ export function Modal({
         setIsClosing(false);
         setCachedChildren(null);
         setCachedTitle(undefined);
-      }, 200); // Match animation duration
+      }, 150); // Match animation duration
       return () => clearTimeout(timer);
     }
   }, [isClosing]);
@@ -86,7 +86,7 @@ export function Modal({
           <X className="h-5 w-5" />
         </button>
         {(isOpen ? title : cachedTitle) && (
-          <h3 className={`text-lg font-semibold ${darkMode ? "text-white" : "text-slate-900"}`}>
+          <h3 className={`mb-4 text-lg font-semibold ${darkMode ? "text-white" : "text-slate-900"}`}>
             {isOpen ? title : cachedTitle}
           </h3>
         )}
