@@ -1,4 +1,4 @@
-import { and, eq, sql, gte, lte } from "drizzle-orm";
+import { and, eq, sql, gte, lte, desc } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { modelPrices, usageRecords } from "@/lib/db/schema";
@@ -156,7 +156,7 @@ export async function getOverview(
     .from(usageRecords)
     .where(filterWhere)
     .groupBy(dayExpr)
-    .orderBy(dayExpr)
+    .orderBy(desc(dayExpr))
     .limit(days);
 
   const byDayModelPromise: Promise<DayModelAggRow[]> = db
@@ -274,7 +274,7 @@ export async function getOverview(
     dailyCostMap.set(row.label, (dailyCostMap.get(row.label) ?? 0) + cost);
   }
 
-  const byDay: UsageSeriesPoint[] = byDayRows.map((row) => ({
+  const byDay: UsageSeriesPoint[] = [...byDayRows].reverse().map((row) => ({
     label: row.label,
     requests: toNumber(row.requests),
     tokens: toNumber(row.tokens),
