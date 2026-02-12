@@ -113,6 +113,23 @@ function buildHourlySeries(series: UsageSeriesPoint[], rangeHours?: number) {
   return filled;
 }
 
+function buildHourlyLineStyle(pointCount: number, baseStrokeWidth: number) {
+  const safeCount = Math.max(0, pointCount);
+  const density = Math.min(1, Math.max(0, (safeCount - 36) / 120));
+  const minStrokeWidth = 1.2;
+  const strokeWidth = Number((baseStrokeWidth - (baseStrokeWidth - minStrokeWidth) * density).toFixed(2));
+  const showDot = safeCount <= 72;
+  const dotRadius = safeCount <= 24 ? 3 : safeCount <= 48 ? 2.5 : 2;
+  const activeDotRadius = safeCount <= 72 ? 6 : safeCount <= 120 ? 5 : 4;
+
+  return {
+    strokeWidth,
+    showDot,
+    dotRadius,
+    activeDotRadius
+  };
+}
+
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [prices, setPrices] = useState<ModelPrice[]>([]);
@@ -745,6 +762,16 @@ export default function DashboardPage() {
     const hours = hourRange === "24h" ? 24 : 72;
     return buildHourlySeries(overviewData.byHour, hours);
   }, [hourRange, overviewData?.byHour]);
+
+  const hourlyLineStyle = useMemo(
+    () => buildHourlyLineStyle(hourlySeries.length, 3),
+    [hourlySeries.length]
+  );
+
+  const fullscreenHourlyLineStyle = useMemo(
+    () => buildHourlyLineStyle(hourlySeries.length, fullscreenHourlyMode === "area" ? 2.3 : 3),
+    [hourlySeries.length, fullscreenHourlyMode]
+  );
 
   useEffect(() => {
     if (fullscreenChart === "stacked") {
@@ -1802,9 +1829,11 @@ export default function DashboardPage() {
                     dataKey="requests" 
                     name="请求数" 
                     stroke={darkMode ? "#60a5fa" : "#3b82f6"} 
-                    strokeWidth={3}
-                    dot={{ r: 3, fill: darkMode ? "#60a5fa" : "#3b82f6", stroke: "#fff", strokeWidth: 1, fillOpacity: 0.2 }} 
-                    activeDot={{ r: 6, stroke: "#fff", strokeWidth: 2 }} 
+                    strokeWidth={hourlyLineStyle.strokeWidth}
+                    dot={hourlyLineStyle.showDot
+                      ? { r: hourlyLineStyle.dotRadius, fill: darkMode ? "#60a5fa" : "#3b82f6", stroke: "#fff", strokeWidth: 1, fillOpacity: 0.2 }
+                      : false}
+                    activeDot={{ r: hourlyLineStyle.activeDotRadius, stroke: "#fff", strokeWidth: 2 }} 
                   />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -2547,10 +2576,12 @@ export default function DashboardPage() {
                     dataKey="requests" 
                     name="请求数" 
                     stroke={darkMode ? "#60a5fa" : "#3b82f6"} 
-                    strokeWidth={fullscreenHourlyMode === "area" ? 2.3 : 3}
+                    strokeWidth={fullscreenHourlyLineStyle.strokeWidth}
                     strokeOpacity={1}
-                    dot={{ r: 3, fill: darkMode ? "#60a5fa" : "#3b82f6", stroke: "#fff", strokeWidth: 1, fillOpacity: 0.2 }} 
-                    activeDot={{ r: 6, stroke: "#fff", strokeWidth: 2 }} 
+                    dot={fullscreenHourlyLineStyle.showDot
+                      ? { r: fullscreenHourlyLineStyle.dotRadius, fill: darkMode ? "#60a5fa" : "#3b82f6", stroke: "#fff", strokeWidth: 1, fillOpacity: 0.2 }
+                      : false}
+                    activeDot={{ r: fullscreenHourlyLineStyle.activeDotRadius, stroke: "#fff", strokeWidth: 2 }} 
                   />
                 </ComposedChart>
               </ResponsiveContainer>
