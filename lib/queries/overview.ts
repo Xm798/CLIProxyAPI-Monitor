@@ -107,7 +107,11 @@ export async function getOverview(
   if (opts?.source) filterWhereParts.push(eq(usageRecords.source, opts.source));
   if (opts?.name) {
     filterWhereParts.push(
-      sql`exists (select 1 from auth_file_mappings af where af.auth_id = ${usageRecords.authIndex} and af.name = ${opts.name})`
+      sql`coalesce(
+        nullif((select af.name from auth_file_mappings af where af.auth_id = ${usageRecords.authIndex} limit 1), ''),
+        nullif(${usageRecords.source}, ''),
+        '-'
+      ) = ${opts.name}`
     );
   }
   const filterWhere = filterWhereParts.length ? and(...filterWhereParts) : undefined;
@@ -120,6 +124,7 @@ export async function getOverview(
   const tzLiteral = sql.raw(`'${tz}'`);
   const dayExpr = sql`date_trunc('day', ${usageRecords.occurredAt} at time zone ${tzLiteral})`;
   const hourExpr = sql`date_trunc('hour', ${usageRecords.occurredAt} at time zone ${tzLiteral})`;
+  const credentialNameExpr = sql<string>`coalesce(nullif(${authFileMappings.name}, ''), nullif(${usageRecords.source}, ''), '-')`;
 
   const totalsPromise: Promise<TotalsRow[]> = db
     .select({
@@ -224,12 +229,12 @@ export async function getOverview(
     .orderBy(usageRecords.source);
 
   const availableNamesPromise: Promise<{ name: string | null }[]> = db
-    .select({ name: authFileMappings.name })
+    .select({ name: credentialNameExpr })
     .from(usageRecords)
     .leftJoin(authFileMappings, eq(usageRecords.authIndex, authFileMappings.authId))
     .where(baseWhere)
-    .groupBy(authFileMappings.name)
-    .orderBy(authFileMappings.name);
+    .groupBy(credentialNameExpr)
+    .orderBy(credentialNameExpr);
 
   const [
     totalsRowResult,
@@ -357,7 +362,7 @@ export async function getOverview(
     models: availableModelsRows.map((r) => r.model).filter(Boolean),
     routes: availableRoutesRows.map((r) => r.route).filter(Boolean),
     sources: availableSourcesRows.map((r) => r.source).filter(Boolean),
-    names: availableNamesRows.map((r) => r.name).filter((name): name is string => Boolean(name))
+    names: availableNamesRows.map((r) => r.name).filter((name): name is string => Boolean(name) && name !== "-")
   };
 
   return {

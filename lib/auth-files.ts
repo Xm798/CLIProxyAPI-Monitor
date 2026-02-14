@@ -8,6 +8,7 @@ const authFileItemSchema = z
     id: z.union([z.string(), z.number()]).optional(),
     auth_index: z.union([z.string(), z.number()]).optional(),
     authIndex: z.union([z.string(), z.number()]).optional(),
+    index: z.union([z.string(), z.number()]).optional(),
     name: z.string().optional(),
     label: z.string().optional(),
     provider: z.string().optional(),
@@ -67,14 +68,19 @@ export function toAuthFileMappings(payload: unknown, pulledAt: Date = new Date()
     const parsed = authFileItemSchema.safeParse(item);
     if (!parsed.success) continue;
 
-    const authId = toTrimmedString(parsed.data.id ?? parsed.data.auth_index ?? parsed.data.authIndex);
+    const name = toTrimmedString(parsed.data.name);
+    const explicitAuthIndex = parsed.data.auth_index ?? parsed.data.authIndex ?? parsed.data.index;
+    const authId = toTrimmedString(explicitAuthIndex ?? parsed.data.id);
     if (!authId) continue;
+
+    // 某些返回中 id 可能与 name 同值但并非 usage 里的 auth_index，避免误写入错误映射主键。
+    if (explicitAuthIndex === undefined && name && authId === name) continue;
 
     const updatedAt = toDateOrNull(parsed.data.updated_at ?? parsed.data.updatedAt);
 
     dedup.set(authId, {
       authId,
-      name: toTrimmedString(parsed.data.name),
+      name,
       label: toTrimmedString(parsed.data.label) || null,
       provider: toTrimmedString(parsed.data.provider) || null,
       source: toTrimmedString(parsed.data.source) || null,

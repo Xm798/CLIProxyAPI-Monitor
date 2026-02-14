@@ -29,7 +29,7 @@ type OverviewAPIResponse = {
   days: number;
   timezone?: string;
   meta?: OverviewMeta;
-  filters?: { models: string[]; routes: string[]; sources: string[]; names: string[] };
+  filters?: { models: string[]; routes: string[]; names: string[] };
 };
 
 type PriceForm = {
@@ -191,15 +191,12 @@ export default function DashboardPage() {
   const [hourRange, setHourRange] = useState<"all" | "24h" | "72h">("all");
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [routeOptions, setRouteOptions] = useState<string[]>([]);
-  const [sourceOptions, setSourceOptions] = useState<string[]>([]);
   const [nameOptions, setNameOptions] = useState<string[]>([]);
   const [filterModelInput, setFilterModelInput] = useState("");
   const [filterRouteInput, setFilterRouteInput] = useState("");
-  const [filterSourceInput, setFilterSourceInput] = useState("");
   const [filterNameInput, setFilterNameInput] = useState("");
   const [filterModel, setFilterModel] = useState<string | undefined>(undefined);
   const [filterRoute, setFilterRoute] = useState<string | undefined>(undefined);
-  const [filterSource, setFilterSource] = useState<string | undefined>(undefined);
   const [filterName, setFilterName] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);
   const [form, setForm] = useState<PriceForm>({ model: "", inputPricePer1M: "", cachedInputPricePer1M: "", outputPricePer1M: "" });
@@ -729,7 +726,6 @@ export default function DashboardPage() {
         }
         if (filterModel) params.set("model", filterModel);
         if (filterRoute) params.set("route", filterRoute);
-        if (filterSource) params.set("source", filterSource);
         if (filterName) params.set("name", filterName);
         params.set("page", String(page));
         params.set("pageSize", "500");
@@ -757,7 +753,6 @@ export default function DashboardPage() {
         setPage(data.meta?.page ?? 1);
         setModelOptions(Array.from(new Set(data.filters?.models ?? [])));
         setRouteOptions(Array.from(new Set(data.filters?.routes ?? [])));
-        setSourceOptions(Array.from(new Set(data.filters?.sources ?? [])));
         setNameOptions(Array.from(new Set(data.filters?.names ?? [])));
         setAppliedDays(data.days ?? rangeDays);
       } catch (err) {
@@ -775,7 +770,7 @@ export default function DashboardPage() {
       active = false;
       controller.abort();
     };
-  }, [rangeMode, customStart, customEnd, rangeDays, filterModel, filterRoute, filterSource, filterName, page, refreshTrigger, ready]);
+  }, [rangeMode, customStart, customEnd, rangeDays, filterModel, filterRoute, filterName, page, refreshTrigger, ready]);
 
   const overviewData = overview;
   const showEmpty = overviewEmpty || !overview;
@@ -893,7 +888,6 @@ export default function DashboardPage() {
     setPage(1);
     setFilterModel(filterModelInput.trim() || undefined);
     setFilterRoute(filterRouteInput.trim() || undefined);
-    setFilterSource(filterSourceInput.trim() || undefined);
     setFilterName(filterNameInput.trim() || undefined);
   };
 
@@ -906,12 +900,6 @@ export default function DashboardPage() {
   const applyRouteOption = (val: string) => {
     setFilterRouteInput(val);
     setFilterRoute(val.trim() || undefined);
-    setPage(1);
-  };
-
-  const applySourceOption = (val: string) => {
-    setFilterSourceInput(val);
-    setFilterSource(val.trim() || undefined);
     setPage(1);
   };
 
@@ -1276,23 +1264,10 @@ export default function DashboardPage() {
             }}
           />
           <ComboBox
-            value={filterSourceInput}
-            onChange={setFilterSourceInput}
-            options={sourceOptions}
-            placeholder="按凭证过滤"
-            darkMode={darkMode}
-            onSelectOption={applySourceOption}
-            onClear={() => {
-              setFilterSourceInput("");
-              setFilterSource(undefined);
-              setPage(1);
-            }}
-          />
-          <ComboBox
             value={filterNameInput}
             onChange={setFilterNameInput}
             options={nameOptions}
-            placeholder="按凭证名过滤"
+            placeholder="按凭证过滤"
             darkMode={darkMode}
             onSelectOption={applyNameOption}
             onClear={() => {
@@ -1307,16 +1282,14 @@ export default function DashboardPage() {
           >
             应用筛选
           </button>
-          {(filterModel || filterRoute || filterSource || filterName) ? (
+          {(filterModel || filterRoute || filterName) ? (
             <button
               onClick={() => {
                 setFilterModelInput("");
                 setFilterRouteInput("");
-                setFilterSourceInput("");
                 setFilterNameInput("");
                 setFilterModel(undefined);
                 setFilterRoute(undefined);
-                setFilterSource(undefined);
                 setFilterName(undefined);
                 setPage(1);
               }}
