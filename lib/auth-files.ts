@@ -78,16 +78,28 @@ export function toAuthFileMappings(payload: unknown, pulledAt: Date = new Date()
 
     const updatedAt = toDateOrNull(parsed.data.updated_at ?? parsed.data.updatedAt);
 
-    dedup.set(authId, {
-      authId,
-      name,
-      label: toTrimmedString(parsed.data.label) || null,
-      provider: toTrimmedString(parsed.data.provider) || null,
-      source: toTrimmedString(parsed.data.source) || null,
-      email: toTrimmedString(parsed.data.email) || null,
-      updatedAt,
-      syncedAt: pulledAt
-    });
+    const existing = dedup.get(authId);
+
+    // Only replace an existing entry when:
+    // - there is no existing entry, or
+    // - the new record has an updatedAt and the existing one is null, or
+    // - both have updatedAt and the new one is more recent.
+    if (
+      !existing ||
+      (updatedAt &&
+        (!existing.updatedAt || updatedAt > existing.updatedAt))
+    ) {
+      dedup.set(authId, {
+        authId,
+        name: toTrimmedString(parsed.data.name),
+        label: toTrimmedString(parsed.data.label) || null,
+        provider: toTrimmedString(parsed.data.provider) || null,
+        source: toTrimmedString(parsed.data.source) || null,
+        email: toTrimmedString(parsed.data.email) || null,
+        updatedAt,
+        syncedAt: pulledAt
+      });
+    }
   }
 
   return Array.from(dedup.values());
