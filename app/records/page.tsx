@@ -1393,7 +1393,7 @@ function ComboBox({
       {isVisible && filtered.length > 0 ? (
         <div
           className={`absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-xl border shadow-lg scrollbar-slim ${
-            darkMode ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-white"
+            darkMode ? "border-slate-600/60 bg-slate-900/70 backdrop-blur-sm" : "border-slate-200/80 bg-white/80 backdrop-blur-sm"
           } ${isClosing ? "animate-dropdown-out" : "animate-dropdown-in"}`}
         >
           {filtered.map((opt) => (

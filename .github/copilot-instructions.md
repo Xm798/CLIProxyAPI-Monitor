@@ -103,3 +103,4 @@ Before starting a new task in the above plan, update progress in the plan.
 - Work through each checklist item systematically.
 - Keep communication concise and focused.
 - Follow development best practices.
+- 每次功能或行为变更后，必须同步更新 CHANGELOG.md（中文、按日期拆分、简要说明改动与作用）。
