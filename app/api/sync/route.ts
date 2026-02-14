@@ -126,6 +126,11 @@ async function performSync(request: Request) {
     }, USAGE_TIMEOUT_MS);
   } catch (error) {
     const isTimeout = error instanceof Error && error.name === "AbortError";
+    console.warn("[sync] usage fetch failed", {
+      reason: isTimeout ? "timeout" : "error",
+      isTimeout,
+      message: error instanceof Error ? error.message : String(error)
+    });
     return NextResponse.json(
       {
         error: isTimeout ? "Upstream usage request timed out" : "Failed to fetch usage"
