@@ -11,6 +11,8 @@ export const runtime = "nodejs";
 
 const PASSWORD = process.env.PASSWORD || process.env.CLIPROXY_SECRET_KEY || "";
 const COOKIE_NAME = "dashboard_auth";
+const AUTH_FILES_TIMEOUT_MS = 15_000;
+const USAGE_TIMEOUT_MS = 60_000;
 
 function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -18,6 +20,20 @@ function unauthorized() {
 
 function missingPassword() {
   return NextResponse.json({ error: "PASSWORD is missing" }, { status: 501 });
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function hashPassword(value: string) {
@@ -51,13 +67,13 @@ async function isAuthorized(request: Request) {
 async function syncAuthFileMappings(pulledAt: Date) {
   const authFilesUrl = `${config.cliproxy.baseUrl.replace(/\/$/, "")}/auth-files`;
 
-  const response = await fetch(authFilesUrl, {
+  const response = await fetchWithTimeout(authFilesUrl, {
     headers: {
       Authorization: `Bearer ${config.cliproxy.apiKey}`,
       "Content-Type": "application/json"
     },
     cache: "no-store"
-  });
+  }, AUTH_FILES_TIMEOUT_MS);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch auth-files: ${response.status} ${response.statusText}`);
@@ -99,13 +115,29 @@ async function performSync(request: Request) {
   const usageUrl = `${config.cliproxy.baseUrl.replace(/\/$/, "")}/usage`;
   const pulledAt = new Date();
 
-  const response = await fetch(usageUrl, {
-    headers: {
-      Authorization: `Bearer ${config.cliproxy.apiKey}`,
-      "Content-Type": "application/json"
-    },
-    cache: "no-store"
-  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(usageUrl, {
+      headers: {
+        Authorization: `Bearer ${config.cliproxy.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      cache: "no-store"
+    }, USAGE_TIMEOUT_MS);
+  } catch (error) {
+    const isTimeout = error instanceof Error && error.name === "AbortError";
+    console.warn("[sync] usage fetch failed", {
+      reason: isTimeout ? "timeout" : "error",
+      isTimeout,
+      message: error instanceof Error ? error.message : String(error)
+    });
+    return NextResponse.json(
+      {
+        error: isTimeout ? "Upstream usage request timed out" : "Failed to fetch usage"
+      },
+      { status: isTimeout ? 504 : 502 }
+    );
+  }
 
   if (!response.ok) {
     return NextResponse.json(
@@ -133,7 +165,8 @@ async function performSync(request: Request) {
   try {
     authFilesSynced = await syncAuthFileMappings(pulledAt);
   } catch (error) {
-    authFilesWarning = "auth-files sync failed";
+    const isTimeout = error instanceof Error && error.name === "AbortError";
+    authFilesWarning = isTimeout ? "auth-files sync timed out" : "auth-files sync failed";
     console.warn("/api/sync auth-files sync failed:", error);
   }
 

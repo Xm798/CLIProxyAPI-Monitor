@@ -2089,7 +2089,7 @@ function ComboBox({
 
       {isVisible && filtered.length > 0 ? (
         <div
-          className={`absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-xl border border-slate-700 bg-slate-900 shadow-lg scrollbar-slim ${
+          className={`absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-xl border border-slate-600/60 bg-slate-900/70 backdrop-blur-sm shadow-lg scrollbar-slim ${
             isClosing ? "animate-dropdown-out" : "animate-dropdown-in"
           }`}
         >

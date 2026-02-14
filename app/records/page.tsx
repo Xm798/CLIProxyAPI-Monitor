@@ -283,6 +283,7 @@ export default function RecordsPage() {
   const [syncing, setSyncing] = useState(false);
   const syncingRef = useRef(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [syncStatusType, setSyncStatusType] = useState<"success" | "warning" | "error" | null>(null);
   const syncStatusTimerRef = useRef<number | null>(null);
   const [syncStatusClosing, setSyncStatusClosing] = useState(false);
 
@@ -560,6 +561,7 @@ export default function RecordsPage() {
     setSyncStatusClosing(true);
     setTimeout(() => {
       setSyncStatus(null);
+      setSyncStatusType(null);
       setSyncStatusClosing(false);
     }, 400);
   }, []);
@@ -586,6 +588,7 @@ export default function RecordsPage() {
     syncingRef.current = true;
     setSyncing(true);
     setSyncStatus(null);
+    setSyncStatusType(null);
     setError(null);
     try {
       const controller = new AbortController();
@@ -599,15 +602,34 @@ export default function RecordsPage() {
       clearTimeout(timeoutId);
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || res.statusText);
+      if (!res.ok) {
+        const msg = `同步失败: ${data.error || res.statusText}`;
+        setSyncStatusType("error");
+        setSyncStatus(msg);
+        setError(msg);
+        return 0;
+      }
 
       const inserted = data.inserted ?? 0;
-      if (inserted > 0) {
+      const authFilesWarning = typeof data.authFilesWarning === "string" ? data.authFilesWarning : "";
+
+      if (authFilesWarning) {
+        setSyncStatusType("warning");
+        const fullMessage = inserted > 0
+          ? `同步完成，但认证映射同步异常：${authFilesWarning}（已同步 ${inserted} 条记录）`
+          : `同步完成，但认证映射同步异常：${authFilesWarning}`;
+        setSyncStatus(fullMessage);
+      } else if (inserted > 0) {
+        setSyncStatusType("success");
         setSyncStatus(`已同步 ${inserted} 条记录`);
       }
       return inserted;
     } catch (err) {
-      setError((err as Error).message || "同步失败");
+      const isTimeout = (err as Error).name === "AbortError";
+      const msg = isTimeout ? "同步超时：请稍后重试" : `同步失败: ${(err as Error).message || "请求失败"}`;
+      setSyncStatusType("error");
+      setSyncStatus(msg);
+      setError(msg);
       return 0;
     } finally {
       syncingRef.current = false;
@@ -1275,10 +1297,16 @@ export default function RecordsPage() {
           onClick={() => closeSyncStatus()}
           className={`fixed right-6 top-26 z-50 max-w-[290px] cursor-pointer rounded-lg border px-4 py-3 shadow-lg transition-opacity hover:opacity-90 ${
             syncStatusClosing ? "animate-toast-out" : "animate-toast-in"
-          } border-green-500/40 bg-green-900/80 text-green-100`}
+          } ${
+            syncStatusType === "error"
+              ? "border-rose-500/30 bg-rose-950/60 text-rose-200"
+              : syncStatusType === "warning"
+                ? "border-amber-500/40 bg-amber-950/70 text-amber-200"
+                : "border-green-500/40 bg-green-900/80 text-green-100"
+          }`}
         >
           <div className="flex items-center gap-2.5">
-            <span className="text-xl animate-emoji-pop">✅</span>
+            <span className="text-xl animate-emoji-pop">{syncStatusType === "error" ? "❌" : syncStatusType === "warning" ? "⚠️" : "✅"}</span>
             <span className="text-sm font-medium">{syncStatus}</span>
           </div>
         </div>
@@ -1393,7 +1421,7 @@ function ComboBox({
       {isVisible && filtered.length > 0 ? (
         <div
           className={`absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-xl border shadow-lg scrollbar-slim ${
-            darkMode ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-white"
+            darkMode ? "border-slate-600/60 bg-slate-900/70 backdrop-blur-sm" : "border-slate-200/80 bg-white/80 backdrop-blur-sm"
           } ${isClosing ? "animate-dropdown-out" : "animate-dropdown-in"}`}
         >
           {filtered.map((opt) => (
