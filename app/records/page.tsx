@@ -283,7 +283,7 @@ export default function RecordsPage() {
   const [syncing, setSyncing] = useState(false);
   const syncingRef = useRef(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
-  const [syncStatusType, setSyncStatusType] = useState<"success" | "error" | null>(null);
+  const [syncStatusType, setSyncStatusType] = useState<"success" | "warning" | "error" | null>(null);
   const syncStatusTimerRef = useRef<number | null>(null);
   const [syncStatusClosing, setSyncStatusClosing] = useState(false);
 
@@ -611,7 +611,15 @@ export default function RecordsPage() {
       }
 
       const inserted = data.inserted ?? 0;
-      if (inserted > 0) {
+      const authFilesWarning = typeof data.authFilesWarning === "string" ? data.authFilesWarning : "";
+
+      if (authFilesWarning) {
+        setSyncStatusType("warning");
+        const fullMessage = inserted > 0
+          ? `同步完成，但认证映射同步异常：${authFilesWarning}（已同步 ${inserted} 条记录）`
+          : `同步完成，但认证映射同步异常：${authFilesWarning}`;
+        setSyncStatus(fullMessage);
+      } else if (inserted > 0) {
         setSyncStatusType("success");
         setSyncStatus(`已同步 ${inserted} 条记录`);
       }
@@ -1292,11 +1300,13 @@ export default function RecordsPage() {
           } ${
             syncStatusType === "error"
               ? "border-rose-500/30 bg-rose-950/60 text-rose-200"
-              : "border-green-500/40 bg-green-900/80 text-green-100"
+              : syncStatusType === "warning"
+                ? "border-amber-500/40 bg-amber-950/70 text-amber-200"
+                : "border-green-500/40 bg-green-900/80 text-green-100"
           }`}
         >
           <div className="flex items-center gap-2.5">
-            <span className="text-xl animate-emoji-pop">{syncStatusType === "error" ? "❌" : "✅"}</span>
+            <span className="text-xl animate-emoji-pop">{syncStatusType === "error" ? "❌" : syncStatusType === "warning" ? "⚠️" : "✅"}</span>
             <span className="text-sm font-medium">{syncStatus}</span>
           </div>
         </div>
