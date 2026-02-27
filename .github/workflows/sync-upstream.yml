@@ -1,0 +1,67 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream changes
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream https://github.com/sxjeru/CLIProxyAPI-Monitor.git
+          git fetch upstream main
+
+          if ! git merge --no-ff --no-commit upstream/main; then
+            git merge --abort
+            echo "has_conflict=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --quiet --cached && git diff --quiet; then
+            echo "no_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+      - name: Create sync pull request
+        if: steps.merge.outputs.no_changes != 'true' && steps.merge.outputs.has_conflict != 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/sync-upstream
+          delete-branch: true
+          commit-message: "chore: sync upstream changes"
+          title: "chore: sync upstream changes"
+          body: |
+            Automated upstream sync PR.
+
+            Source:
+            - upstream: `sxjeru/CLIProxyAPI-Monitor`
+            - branch: `main`
+          base: main
+          labels: |
+            dependencies
+            upstream-sync
+
+      - name: Report merge conflict
+        if: steps.merge.outputs.has_conflict == 'true'
+        run: echo "Upstream sync has merge conflicts. Please resolve manually."
